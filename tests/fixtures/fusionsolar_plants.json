@@ -1,0 +1,30 @@
+{
+  "data": {
+    "list": [
+      {
+        "dn": "NE=10000001",
+        "name": "Plant 1",
+        "currentPower": "0.19",
+        "dailyEnergy": "2.91",
+        "monthEnergy": "105.62",
+        "yearEnergy": "105.62",
+        "cumulativeEnergy": "105.62"
+      },
+      {
+        "dn": "NE=10000002",
+        "name": "Plant 2",
+        "currentPower": "0.10",
+        "dailyEnergy": "1.00",
+        "monthEnergy": "10.50",
+        "yearEnergy": "80.00",
+        "cumulativeEnergy": "800.00"
+      }
+    ],
+    "pageCount": 1,
+    "pageNo": 1,
+    "pageSize": 10,
+    "total": 2
+  },
+  "success": true,
+  "failCode": 0
+}

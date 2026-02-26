@@ -1,0 +1,67 @@
+{
+  "title": "Huawei FusionSolar",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect FusionSolar",
+        "description": "Sign in with your FusionSolar credentials.",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "host_override": "Host override (optional)",
+          "verify_ssl": "Verify SSL certificate"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect FusionSolar",
+        "description": "Session expired. Enter your password to reconnect.",
+        "data": {
+          "password": "Password",
+          "host_override": "Host override (optional)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to FusionSolar",
+      "invalid_auth": "Invalid credentials",
+      "rate_limited": "FusionSolar temporarily rate-limited this account",
+      "endpoint_schema_changed": "FusionSolar API response changed",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "reauth_successful": "Reauthentication successful"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Huawei FusionSolar options",
+        "data": {
+          "poll_interval_seconds": "Polling interval (seconds)",
+          "request_timeout_seconds": "Request timeout (seconds)",
+          "host_override": "Host override (optional)",
+          "enabled_plant_ids": "Enabled plants"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "power_w": {
+        "name": "Power"
+      },
+      "energy_today_kwh": {
+        "name": "Energy today"
+      },
+      "energy_month_kwh": {
+        "name": "Energy this month"
+      },
+      "energy_year_kwh": {
+        "name": "Energy this year"
+      },
+      "energy_total_kwh": {
+        "name": "Total energy"
+      }
+    }
+  }
+}

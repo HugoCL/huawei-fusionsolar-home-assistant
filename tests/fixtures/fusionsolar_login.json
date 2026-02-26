@@ -1,0 +1,11 @@
+{
+  "host": "la5.fusionsolar.huawei.com",
+  "validate_user": {
+    "code": 0,
+    "message": null,
+    "payload": {
+      "ticket": "ST-example-ticket",
+      "redirectURL": "/rest/dp/uidm/auth/v1/on-sso-credential-ready?ticket=ST-example-ticket"
+    }
+  }
+}

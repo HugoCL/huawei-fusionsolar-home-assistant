@@ -1,0 +1,11 @@
+{
+  "data": {
+    "monthEnergy": 105.62,
+    "cumulativeEnergy": 105.62,
+    "currentPower": 0.19,
+    "dailyEnergy": 2.91,
+    "yearEnergy": 105.62
+  },
+  "success": true,
+  "failCode": 0
+}

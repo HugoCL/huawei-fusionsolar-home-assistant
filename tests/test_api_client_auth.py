@@ -16,6 +16,47 @@ from tests._fake_http import FakeClientSession, StubResponse
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
+def _prelogin_routes(host: str) -> dict[tuple[str, str], list[StubResponse]]:
+    return {
+        ("GET", "/pvmswebsite/login/build/index.html"): [
+            StubResponse(
+                status=200,
+                payload={"raw": "<html></html>"},
+                url=f"https://{host}/pvmswebsite/login/build/index.html",
+                headers={"content-type": "text/html; charset=UTF-8"},
+            )
+        ],
+        ("GET", "/rest/pvms/web/security/v1/language"): [
+            StubResponse(
+                status=200,
+                payload={"success": True},
+                url=f"https://{host}/rest/pvms/web/security/v1/language",
+            )
+        ],
+        ("GET", "/rest/dp/pvms/pvmswebsite/v1/deployment"): [
+            StubResponse(
+                status=200,
+                payload={"success": True},
+                url=f"https://{host}/rest/dp/pvms/pvmswebsite/v1/deployment",
+            )
+        ],
+        ("GET", "/rest/dp/uidm/unisso/v1/is-check-verify-code"): [
+            StubResponse(
+                status=200,
+                payload={"code": 0, "payload": {"verifyCodeCreate": False}},
+                url=f"https://{host}/rest/dp/uidm/unisso/v1/is-check-verify-code",
+            )
+        ],
+        ("POST", "/rest/pvms/web/server/v1/servermgmt/list-unforbidden-server"): [
+            StubResponse(
+                status=200,
+                payload={"success": True},
+                url=f"https://{host}/rest/pvms/web/server/v1/servermgmt/list-unforbidden-server",
+            )
+        ],
+    }
+
+
 @pytest.mark.asyncio
 async def test_async_login_completes_sso_flow_and_sets_session() -> None:
     """Client should execute validate-user -> on-sso -> redirecturl flow."""
@@ -23,6 +64,7 @@ async def test_async_login_completes_sso_flow_and_sets_session() -> None:
 
     session = FakeClientSession(
         {
+            **_prelogin_routes(fixture["host"]),
             (
                 "POST",
                 "/rest/dp/uidm/unisso/v1/validate-user",
@@ -88,6 +130,7 @@ async def test_async_get_plants_retries_after_401_with_relogin() -> None:
 
     session = FakeClientSession(
         {
+            **_prelogin_routes("la5.fusionsolar.huawei.com"),
             (
                 "POST",
                 "/rest/pvms/web/station/v1/station/station-list",
@@ -156,6 +199,7 @@ async def test_async_login_raises_invalid_auth() -> None:
     """Invalid auth payload must raise InvalidAuth."""
     session = FakeClientSession(
         {
+            **_prelogin_routes("la5.fusionsolar.huawei.com"),
             (
                 "POST",
                 "/rest/dp/uidm/unisso/v1/validate-user",

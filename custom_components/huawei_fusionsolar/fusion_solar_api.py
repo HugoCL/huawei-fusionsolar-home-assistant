@@ -25,10 +25,18 @@ VERIFY_CODE_CHECK_PATH = "/rest/dp/uidm/unisso/v1/is-check-verify-code"
 LIST_UNFORBIDDEN_SERVER_PATH = (
     "/rest/pvms/web/server/v1/servermgmt/list-unforbidden-server"
 )
+LANGUAGE_PATH = "/rest/pvms/web/security/v1/language"
+DEPLOYMENT_PATH = "/rest/dp/pvms/pvmswebsite/v1/deployment"
 
 KEEPALIVE_PATH = "/rest/dpcloud/auth/v1/keep-alive"
 STATION_LIST_PATH = "/rest/pvms/web/station/v1/station/station-list"
 STATION_REAL_KPI_PATH = "/rest/pvms/web/station/v1/overview/station-real-kpi"
+
+LEGACY_LOGIN_ENDPOINT_CANDIDATES: tuple[str, ...] = (
+    "/rest/pvms/web/station/v1/login",
+    "/rest/pvms/web/login",
+    "/unisso/v3/validateUser.action",
+)
 
 LOGIN_SERVICE_PARAM = "/rest/dp/uidm/auth/v1/on-sso-credential-ready"
 LOGIN_APP_ID = "smartpvms"
@@ -231,6 +239,13 @@ class FusionSolarApiClient:
             "verifycode": "",
         }
 
+        legacy_payload = {
+            "userName": self._username,
+            "username": self._username,
+            "systemCode": self._password,
+            "password": self._password,
+        }
+
         last_error: Exception | None = None
 
         for host in host_candidates:
@@ -250,8 +265,16 @@ class FusionSolarApiClient:
                     allow_auth_retry=False,
                 )
             except (CannotConnect, RateLimited) as err:
-                last_error = err
-                continue
+                LOGGER.debug("FusionSolar SSO login request failed on %s: %s", host, err)
+                try:
+                    await self._async_login_legacy(
+                        host,
+                        legacy_payload,
+                    )
+                except (CannotConnect, RateLimited, EndpointSchemaChanged) as legacy_err:
+                    last_error = legacy_err
+                    continue
+                return
 
             if not _payload_indicates_login_success(login_response.payload):
                 if _payload_requires_verify_code(login_response.payload):
@@ -260,7 +283,15 @@ class FusionSolarApiClient:
                     )
                 if _payload_indicates_invalid_auth(login_response.payload):
                     raise InvalidAuth("Invalid username or password")
-                raise EndpointSchemaChanged("Unexpected login payload")
+                try:
+                    await self._async_login_legacy(
+                        host,
+                        legacy_payload,
+                    )
+                except (CannotConnect, RateLimited, EndpointSchemaChanged) as legacy_err:
+                    last_error = legacy_err
+                    continue
+                return
 
             ticket = _extract_login_ticket(login_response.payload, login_response.headers)
             if not ticket:
@@ -301,20 +332,68 @@ class FusionSolarApiClient:
 
         raise InvalidAuth("Authentication failed")
 
+    async def _async_login_legacy(
+        self,
+        host: str,
+        payload: dict[str, str],
+    ) -> None:
+        """Fallback login flow for legacy FusionSolar environments."""
+        last_error: Exception | None = None
+        invalid_auth: InvalidAuth | None = None
+
+        for endpoint in LEGACY_LOGIN_ENDPOINT_CANDIDATES:
+            try:
+                response = await self._request_raw(
+                    "POST",
+                    endpoint,
+                    host=host,
+                    json_data=payload,
+                    allow_auth_retry=False,
+                )
+            except InvalidAuth as err:
+                invalid_auth = err
+                continue
+            except (CannotConnect, EndpointSchemaChanged) as err:
+                last_error = err
+                continue
+
+            if _payload_indicates_invalid_auth(response.payload):
+                invalid_auth = InvalidAuth("Invalid username or password")
+                continue
+
+            if _payload_indicates_login_success(response.payload) or response.status < 300:
+                self._session_valid = True
+                return
+
+            last_error = EndpointSchemaChanged(
+                f"Unexpected payload from legacy login endpoint {endpoint}"
+            )
+
+        if invalid_auth is not None:
+            raise invalid_auth
+        if last_error is not None:
+            raise last_error
+        raise EndpointSchemaChanged("Legacy login endpoints returned unexpected payload")
+
     async def _async_prelogin_probes(self, host: str) -> None:
         """Run lightweight pre-login endpoints to warm session cookies."""
-        probes: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
-            ("GET", VERIFY_CODE_CHECK_PATH, None),
-            ("POST", LIST_UNFORBIDDEN_SERVER_PATH, {}),
+        probes: tuple[
+            tuple[str, str, dict[str, Any] | None, dict[str, str] | None], ...
+        ] = (
+            ("GET", LOGIN_PAGE_PATH, None, None),
+            ("GET", LANGUAGE_PATH, None, None),
+            ("GET", DEPLOYMENT_PATH, None, None),
+            ("GET", VERIFY_CODE_CHECK_PATH, None, {"app-id": LOGIN_APP_ID}),
+            ("POST", LIST_UNFORBIDDEN_SERVER_PATH, {}, {"app-id": LOGIN_APP_ID}),
         )
-        for method, endpoint, payload in probes:
+        for method, endpoint, payload, extra_headers in probes:
             try:
                 await self._request_raw(
                     method,
                     endpoint,
                     host=host,
                     json_data=payload,
-                    extra_headers={"app-id": LOGIN_APP_ID},
+                    extra_headers=extra_headers,
                     allow_auth_retry=False,
                 )
             except Exception as err:  # noqa: BLE001 - best-effort probe

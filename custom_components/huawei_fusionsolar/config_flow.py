@@ -88,8 +88,11 @@ class FusionSolarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             try:
                 validated = await _async_validate_input(self.hass, user_input)
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
+            except InvalidAuth as err:
+                if "received html" in str(err).lower():
+                    errors["base"] = "cannot_connect"
+                else:
+                    errors["base"] = "invalid_auth"
             except RateLimited:
                 errors["base"] = "rate_limited"
             except EndpointSchemaChanged:
@@ -176,8 +179,11 @@ class FusionSolarConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             try:
                 validated = await _async_validate_input(self.hass, payload)
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
+            except InvalidAuth as err:
+                if "received html" in str(err).lower():
+                    errors["base"] = "cannot_connect"
+                else:
+                    errors["base"] = "invalid_auth"
             except RateLimited:
                 errors["base"] = "rate_limited"
             except EndpointSchemaChanged:

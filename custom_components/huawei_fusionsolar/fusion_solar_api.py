@@ -20,6 +20,11 @@ LOGGER = logging.getLogger(__name__)
 VALIDATE_USER_PATH = "/rest/dp/uidm/unisso/v1/validate-user"
 SSO_READY_PATH = "/rest/dp/uidm/auth/v1/on-sso-credential-ready"
 LOGIN_REDIRECT_PATH = "/rest/pvms/web/login/v1/redirecturl"
+LOGIN_PAGE_PATH = "/pvmswebsite/login/build/index.html"
+VERIFY_CODE_CHECK_PATH = "/rest/dp/uidm/unisso/v1/is-check-verify-code"
+LIST_UNFORBIDDEN_SERVER_PATH = (
+    "/rest/pvms/web/server/v1/servermgmt/list-unforbidden-server"
+)
 
 KEEPALIVE_PATH = "/rest/dpcloud/auth/v1/keep-alive"
 STATION_LIST_PATH = "/rest/pvms/web/station/v1/station/station-list"
@@ -27,6 +32,10 @@ STATION_REAL_KPI_PATH = "/rest/pvms/web/station/v1/overview/station-real-kpi"
 
 LOGIN_SERVICE_PARAM = "/rest/dp/uidm/auth/v1/on-sso-credential-ready"
 LOGIN_APP_ID = "smartpvms"
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+)
 
 LOGIN_ERROR_CODES = {
     "401",
@@ -228,6 +237,8 @@ class FusionSolarApiClient:
             if not host:
                 continue
 
+            await self._async_prelogin_probes(host)
+
             try:
                 login_response = await self._request_raw(
                     "POST",
@@ -243,6 +254,10 @@ class FusionSolarApiClient:
                 continue
 
             if not _payload_indicates_login_success(login_response.payload):
+                if _payload_requires_verify_code(login_response.payload):
+                    raise CannotConnect(
+                        "FusionSolar requested verification code challenge"
+                    )
                 if _payload_indicates_invalid_auth(login_response.payload):
                     raise InvalidAuth("Invalid username or password")
                 raise EndpointSchemaChanged("Unexpected login payload")
@@ -285,6 +300,25 @@ class FusionSolarApiClient:
             raise CannotConnect("Could not connect to FusionSolar") from last_error
 
         raise InvalidAuth("Authentication failed")
+
+    async def _async_prelogin_probes(self, host: str) -> None:
+        """Run lightweight pre-login endpoints to warm session cookies."""
+        probes: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
+            ("GET", VERIFY_CODE_CHECK_PATH, None),
+            ("POST", LIST_UNFORBIDDEN_SERVER_PATH, {}),
+        )
+        for method, endpoint, payload in probes:
+            try:
+                await self._request_raw(
+                    method,
+                    endpoint,
+                    host=host,
+                    json_data=payload,
+                    extra_headers={"app-id": LOGIN_APP_ID},
+                    allow_auth_retry=False,
+                )
+            except Exception as err:  # noqa: BLE001 - best-effort probe
+                LOGGER.debug("Pre-login probe failed (%s): %s", endpoint, err)
 
     async def async_refresh_session(self) -> None:
         """Refresh session and fallback to full relogin when needed."""
@@ -400,7 +434,7 @@ class FusionSolarApiClient:
         if params:
             url_obj = url_obj.update_query(params)
 
-        headers = self._build_headers(endpoint, extra_headers)
+        headers = self._build_headers(endpoint, extra_headers, request_host)
 
         for attempt in range(2):
             try:
@@ -445,7 +479,7 @@ class FusionSolarApiClient:
                     and self._password
                 ):
                     await self.async_refresh_session()
-                    headers = self._build_headers(endpoint, extra_headers)
+                    headers = self._build_headers(endpoint, extra_headers, request_host)
                     continue
                 raise InvalidAuth("Unauthorized")
 
@@ -467,6 +501,10 @@ class FusionSolarApiClient:
                 and endpoint != LOGIN_REDIRECT_PATH
                 and "text/html" in content_type
             ):
+                if endpoint == VALIDATE_USER_PATH:
+                    raise CannotConnect(
+                        "FusionSolar returned HTML challenge page before login"
+                    )
                 raise InvalidAuth("Session invalid (received HTML on REST endpoint)")
 
             return raw
@@ -487,17 +525,30 @@ class FusionSolarApiClient:
         self,
         endpoint: str,
         extra_headers: dict[str, str] | None,
+        host: str,
     ) -> dict[str, str]:
         """Build request headers."""
         headers = {
             "Accept": "application/json, text/javascript, */*; q=0.01",
             "X-Requested-With": "XMLHttpRequest",
+            "User-Agent": BROWSER_USER_AGENT,
+            "Accept-Language": "en-US,en;q=0.9",
         }
 
         if endpoint.startswith("/rest/pvms/web/station/"):
             headers["x-non-renewal-session"] = "true"
             headers["x-timezone-offset"] = str(_timezone_offset_minutes())
             headers["roarand"] = _build_roarand_token()
+
+        if endpoint in {
+            VALIDATE_USER_PATH,
+            SSO_READY_PATH,
+            LOGIN_REDIRECT_PATH,
+            VERIFY_CODE_CHECK_PATH,
+            LIST_UNFORBIDDEN_SERVER_PATH,
+        }:
+            headers["Origin"] = f"https://{host}"
+            headers["Referer"] = f"https://{host}{LOGIN_PAGE_PATH}"
 
         if self._csrf_token:
             headers["X-CSRF-Token"] = self._csrf_token
@@ -605,6 +656,15 @@ def _payload_indicates_invalid_auth(payload: Any) -> bool:
         return True
 
     return False
+
+
+def _payload_requires_verify_code(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    data = payload.get("payload")
+    if not isinstance(data, dict):
+        return False
+    return bool(data.get("verifyCodeCreate"))
 
 
 def _extract_login_ticket(payload: Any, headers: dict[str, str]) -> str | None:

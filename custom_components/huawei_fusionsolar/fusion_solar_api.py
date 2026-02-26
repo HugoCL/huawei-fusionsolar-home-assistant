@@ -188,6 +188,7 @@ class FusionSolarApiClient:
         self._timeout_seconds = timeout_seconds
         self._verify_ssl = verify_ssl
         self._csrf_token: str | None = None
+        self._roarand_token: str | None = None
         self._session_valid = False
         self._recent_statuses: deque[dict[str, str | int]] = deque(maxlen=25)
         self._plant_names: dict[str, str] = {}
@@ -403,14 +404,9 @@ class FusionSolarApiClient:
         """Refresh session and fallback to full relogin when needed."""
         if self._session_valid:
             try:
-                response = await self._request_raw(
-                    "GET",
-                    KEEPALIVE_PATH,
-                    allow_auth_retry=False,
-                )
-                if response.status < 400:
-                    self._session_valid = True
-                    return
+                await self._async_refresh_roarand_token()
+                self._session_valid = True
+                return
             except (CannotConnect, RateLimited):
                 pass
             except InvalidAuth:
@@ -421,11 +417,25 @@ class FusionSolarApiClient:
             password=self._password,
             preferred_host=self._preferred_host,
         )
+        await self._async_refresh_roarand_token()
+
+    async def _async_refresh_roarand_token(self) -> None:
+        """Refresh dynamic roarand token from keep-alive endpoint."""
+        response = await self._request_raw(
+            "GET",
+            KEEPALIVE_PATH,
+            allow_auth_retry=False,
+        )
+        token = _extract_keepalive_token(response.payload)
+        if token:
+            self._roarand_token = token
 
     async def async_get_plants(self) -> list[PlantInfo]:
         """Fetch plant list from account."""
         if not self._session_valid:
             await self.async_refresh_session()
+        else:
+            await self._async_refresh_roarand_token()
 
         response = await self._request_raw(
             "POST",
@@ -443,6 +453,8 @@ class FusionSolarApiClient:
         """Fetch normalized telemetry metrics for one plant."""
         if not self._session_valid:
             await self.async_refresh_session()
+        elif not self._roarand_token:
+            await self._async_refresh_roarand_token()
 
         now_ms = int(datetime.now(UTC).timestamp() * 1000)
         params = {
@@ -491,6 +503,7 @@ class FusionSolarApiClient:
             "verify_ssl": self._verify_ssl,
             "timeout_seconds": self._timeout_seconds,
             "session_valid": self._session_valid,
+            "roarand_token_present": bool(self._roarand_token),
             "username_masked": _mask_username(self._username),
             "known_plants": self._plant_names,
             "recent_statuses": list(self._recent_statuses),
@@ -545,6 +558,7 @@ class FusionSolarApiClient:
 
             if raw.status in (401, 403):
                 self._session_valid = False
+                self._roarand_token = None
                 if (
                     allow_auth_retry
                     and attempt == 0
@@ -617,7 +631,7 @@ class FusionSolarApiClient:
         if endpoint.startswith("/rest/pvms/web/station/"):
             headers["x-non-renewal-session"] = "true"
             headers["x-timezone-offset"] = str(_timezone_offset_minutes())
-            headers["roarand"] = _build_roarand_token()
+            headers["roarand"] = self._roarand_token or _build_roarand_token()
 
         if endpoint in {
             VALIDATE_USER_PATH,
@@ -744,6 +758,18 @@ def _payload_requires_verify_code(payload: Any) -> bool:
     if not isinstance(data, dict):
         return False
     return bool(data.get("verifyCodeCreate"))
+
+
+def _extract_keepalive_token(payload: Any) -> str | None:
+    """Extract roarand-like token returned by keep-alive."""
+    if not isinstance(payload, dict):
+        return None
+    if str(payload.get("code")) != "0":
+        return None
+    token = payload.get("payload")
+    if isinstance(token, str) and token.startswith("c-"):
+        return token
+    return None
 
 
 def _extract_login_ticket(payload: Any, headers: dict[str, str]) -> str | None:

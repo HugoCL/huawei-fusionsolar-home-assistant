@@ -17,42 +17,52 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def _prelogin_routes(host: str) -> dict[tuple[str, str], list[StubResponse]]:
+    def many(stub: StubResponse) -> list[StubResponse]:
+        return [stub, stub, stub]
+
     return {
         ("GET", "/pvmswebsite/login/build/index.html"): [
-            StubResponse(
+            *many(StubResponse(
                 status=200,
                 payload={"raw": "<html></html>"},
                 url=f"https://{host}/pvmswebsite/login/build/index.html",
                 headers={"content-type": "text/html; charset=UTF-8"},
-            )
+            ))
         ],
         ("GET", "/rest/pvms/web/security/v1/language"): [
-            StubResponse(
+            *many(StubResponse(
                 status=200,
                 payload={"success": True},
                 url=f"https://{host}/rest/pvms/web/security/v1/language",
-            )
+            ))
         ],
         ("GET", "/rest/dp/pvms/pvmswebsite/v1/deployment"): [
-            StubResponse(
+            *many(StubResponse(
                 status=200,
                 payload={"success": True},
                 url=f"https://{host}/rest/dp/pvms/pvmswebsite/v1/deployment",
-            )
+            ))
         ],
         ("GET", "/rest/dp/uidm/unisso/v1/is-check-verify-code"): [
-            StubResponse(
+            *many(StubResponse(
                 status=200,
                 payload={"code": 0, "payload": {"verifyCodeCreate": False}},
                 url=f"https://{host}/rest/dp/uidm/unisso/v1/is-check-verify-code",
-            )
+            ))
         ],
         ("POST", "/rest/pvms/web/server/v1/servermgmt/list-unforbidden-server"): [
-            StubResponse(
+            *many(StubResponse(
                 status=200,
                 payload={"success": True},
                 url=f"https://{host}/rest/pvms/web/server/v1/servermgmt/list-unforbidden-server",
-            )
+            ))
+        ],
+        ("GET", "/rest/dpcloud/auth/v1/keep-alive"): [
+            *many(StubResponse(
+                status=200,
+                payload={"code": 0, "payload": "c-test-roarand"},
+                url=f"https://{host}/rest/dpcloud/auth/v1/keep-alive",
+            ))
         ],
     }
 
